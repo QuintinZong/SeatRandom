@@ -1,0 +1,21 @@
+# System Junk
+
+*.DS_Store
+
+# Build output
+
+build/
+*.txt
+
+# test files
+
+test/
+
+#IDE config files
+
+.idea/
+.vscode/
+
+# Private files
+
+*.xlsx
