@@ -282,11 +282,13 @@ std::cout<<"Starting...\n";
             }
         }
         std::cout << "Output: " << options.output.u8string() << "\n";
+        std::cout << "\nPress Enter to exit..." << std::flush;
+        std::cin.get();
         return 0;
-        system("pause");
     } catch (std::exception const& error) {
         std::cerr << "Error: " << error.what() << "\n";
+        std::cout << "\nPress Enter to exit..." << std::flush;
+        std::cin.get();
         return 1;
-        system("pause");
     }
 }
