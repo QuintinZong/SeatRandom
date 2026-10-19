@@ -7,7 +7,6 @@
 #include <filesystem>
 #include <iostream>
 #include <optional>
-#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -20,6 +19,7 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#include <commdlg.h>
 #include <shellapi.h>
 #endif
 
@@ -38,6 +38,28 @@ std::string toUtf8(std::wstring const& text) {
                         static_cast<int>(text.size()),
                         result.data(), size, nullptr, nullptr);
     return result;
+}
+
+std::filesystem::path openFileDialog() {
+    wchar_t fileName[MAX_PATH] = {};
+    OPENFILENAMEW dialog{};
+    dialog.lStructSize = sizeof(dialog);
+    dialog.hwndOwner = nullptr;
+    dialog.lpstrFile = fileName;
+    dialog.nMaxFile = MAX_PATH;
+    dialog.lpstrFilter = L"Excel files (*.xlsx)\0*.xlsx\0All files (*.*)\0*.*\0";
+    dialog.nFilterIndex = 1;
+    dialog.lpstrTitle = L"Select the roster Excel file";
+    dialog.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
+
+    if (!GetOpenFileNameW(&dialog)) {
+        if (CommDlgExtendedError() != 0) {
+            throw std::runtime_error("Can't open the file dialog");
+        }
+        return {};
+    }
+
+    return std::filesystem::path(fileName);
 }
 
 std::vector<std::string> commandLineArguments(int argc, char** argv) {
@@ -84,7 +106,7 @@ std::string lowercaseExtension(std::filesystem::path const& path) {
     return result;
 }
 
-std::filesystem::path findInputInExecutableDirectory() {
+std::filesystem::path resolveInputFile() {
     auto directory = executableDirectory();
     std::vector<std::filesystem::path> candidates;
 
@@ -97,16 +119,20 @@ std::filesystem::path findInputInExecutableDirectory() {
         }
     }
 
-    if (candidates.empty()) throw std::runtime_error("Can't find xlsx file");
+    if (candidates.size() == 1) return candidates.front();
 
-    if (candidates.size() > 1) {
-        std::ostringstream message;
-        message << "Can't find xlsx file: multiple .xlsx files in "
-                << directory.u8string();
-        throw std::runtime_error(message.str());
+#ifdef _WIN32
+    auto selected = openFileDialog();
+    if (selected.empty()) {
+        throw std::runtime_error("No file selected");
     }
-
-    return candidates.front();
+    return selected;
+#else
+    if (candidates.empty()) {
+        throw std::runtime_error("Can't find xlsx file");
+    }
+    throw std::runtime_error("Multiple .xlsx files found; specify one explicitly");
+#endif
 }
 
 std::string timestamp() {
@@ -133,6 +159,41 @@ std::filesystem::path defaultOutputPath(std::filesystem::path const& input) {
     return directory / "seat" / std::filesystem::u8path(fileName);
 }
 
+enum class PauseMode {
+    Auto,
+    Always,
+    Never
+};
+
+PauseMode detectPauseMode(std::vector<std::string> const& arguments) {
+    PauseMode mode = PauseMode::Auto;
+    for (auto const& argument : arguments) {
+        if (argument == "--pause") {
+            mode = PauseMode::Always;
+        } else if (argument == "--no-pause") {
+            mode = PauseMode::Never;
+        }
+    }
+    return mode;
+}
+
+bool shouldPause(PauseMode mode) {
+    if (mode == PauseMode::Always) return true;
+    if (mode == PauseMode::Never) return false;
+#ifdef _WIN32
+    DWORD processes[2] = {};
+    return GetConsoleProcessList(processes, 2) == 1;
+#else
+    return false;
+#endif
+}
+
+void waitForEnter(PauseMode mode) {
+    if (!shouldPause(mode)) return;
+    std::cout << "\nPress Enter to exit..." << std::flush;
+    std::cin.get();
+}
+
 void printUsage() {
     std::cout
         << "Usage: seatrandom.exe <input.xlsx> [options]\n"
@@ -141,6 +202,8 @@ void printUsage() {
         << "  --no-header        shuffle all rows; default keeps row 1\n"
         << "  --sheet <name>     process only this sheet; repeatable\n"
         << "  --force            overwrite an existing output file\n"
+        << "  --pause            keep the console open after exit\n"
+        << "  --no-pause         never wait for Enter\n"
         << "  --help             show this help\n";
 }
 
@@ -151,6 +214,7 @@ struct CommandLineOptions {
     bool hasHeader = true;
     bool force = false;
     bool help = false;
+    PauseMode pauseMode = PauseMode::Auto;
     std::vector<std::string> sheets;
 };
 
@@ -185,6 +249,10 @@ CommandLineOptions parseArguments(std::vector<std::string> const& arguments) {
             options.hasHeader = true;
         } else if (argument == "--force") {
             options.force = true;
+        } else if (argument == "--pause") {
+            options.pauseMode = PauseMode::Always;
+        } else if (argument == "--no-pause") {
+            options.pauseMode = PauseMode::Never;
         } else if (argument == "--out" || argument == "-o") {
             if (++index >= arguments.size()) {
                 throw std::runtime_error("Missing value for " + argument);
@@ -213,7 +281,7 @@ CommandLineOptions parseArguments(std::vector<std::string> const& arguments) {
     if (options.help) return options;
 
     if (options.input.empty()) {
-        options.input = findInputInExecutableDirectory();
+        options.input = resolveInputFile();
     }
 
     if (!std::filesystem::is_regular_file(options.input)) {
@@ -245,50 +313,51 @@ CommandLineOptions parseArguments(std::vector<std::string> const& arguments) {
 }
 
 int main(int argc, char** argv) {
-std::cout<<"Starting...\n";
-    #ifdef _WIN32
-    SetConsoleOutputCP(CP_UTF8);        //将控制台输出编码设置为UTF-8
+#ifdef _WIN32
+    SetConsoleOutputCP(CP_UTF8);
     SetConsoleCP(CP_UTF8);
 #endif
 
+    PauseMode pauseMode = PauseMode::Auto;
+    int exitCode = 0;
+
     try {
         auto arguments = commandLineArguments(argc, argv);
+        pauseMode = detectPauseMode(arguments);
         auto options = parseArguments(arguments);
+        pauseMode = options.pauseMode;
 
         if (options.help) {
             printUsage();
-            return 0;
-        }
-
-        if (!options.output.parent_path().empty()) {
-            std::filesystem::create_directories(options.output.parent_path());
-        }
-
-        seatrandom::ShuffleOptions shuffleOptions;
-        shuffleOptions.hasHeader = options.hasHeader;
-        shuffleOptions.forceOverwrite = options.force;
-        shuffleOptions.seed = options.seed;
-        shuffleOptions.selectedSheets = options.sheets;
-
-        auto result = seatrandom::shuffleWorkbook(options.input, options.output, shuffleOptions);
-
-        std::cout << "Seed: " << result.seed << "\n";
-        for (auto const& sheet : result.sheets) {
-            if (sheet.skipped) {
-                std::cout << "[skip] " << sheet.name << ": " << sheet.reason << "\n";
-            } else {
-                std::cout << "[ok] " << sheet.name << ": " << sheet.dataRows
-                          << " rows, seed " << sheet.seed << "\n";
+        } else {
+            if (!options.output.parent_path().empty()) {
+                std::filesystem::create_directories(options.output.parent_path());
             }
+
+            seatrandom::ShuffleOptions shuffleOptions;
+            shuffleOptions.hasHeader = options.hasHeader;
+            shuffleOptions.forceOverwrite = options.force;
+            shuffleOptions.seed = options.seed;
+            shuffleOptions.selectedSheets = options.sheets;
+
+            auto result = seatrandom::shuffleWorkbook(options.input, options.output, shuffleOptions);
+
+            std::cout << "Seed: " << result.seed << "\n";
+            for (auto const& sheet : result.sheets) {
+                if (sheet.skipped) {
+                    std::cout << "[skip] " << sheet.name << ": " << sheet.reason << "\n";
+                } else {
+                    std::cout << "[ok] " << sheet.name << ": " << sheet.dataRows
+                              << " rows, seed " << sheet.seed << "\n";
+                }
+            }
+            std::cout << "Output: " << options.output.u8string() << "\n";
         }
-        std::cout << "Output: " << options.output.u8string() << "\n";
-        std::cout << "\nPress Enter to exit..." << std::flush;
-        std::cin.get();
-        return 0;
     } catch (std::exception const& error) {
         std::cerr << "Error: " << error.what() << "\n";
-        std::cout << "\nPress Enter to exit..." << std::flush;
-        std::cin.get();
-        return 1;
+        exitCode = 1;
     }
+
+    waitForEnter(pauseMode);
+    return exitCode;
 }
