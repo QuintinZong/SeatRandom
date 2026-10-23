@@ -1,3 +1,4 @@
+#include "MatrixWriter.hpp"
 #include "SpreadsheetShuffler.hpp"
 
 #include <algorithm>
@@ -146,17 +147,25 @@ std::string timestamp() {
     return buffer;
 }
 
-std::filesystem::path defaultOutputPath(std::filesystem::path const& input) {
+struct OutputPaths {
+    std::filesystem::path random;
+    std::filesystem::path matrix;
+};
+
+OutputPaths defaultOutputPaths(std::filesystem::path const& input) {
     auto directory = input.parent_path();
     if (directory.empty()) directory = std::filesystem::current_path();
 
     auto stemValue = input.stem().u8string();
-    std::string fileName(stemValue.begin(), stemValue.end());
-    fileName += "_";
-    fileName += timestamp();
-    fileName += ".xlsx";
+    std::string stem(stemValue.begin(), stemValue.end());
+    std::string stamp = timestamp();
+    auto folder = directory / "seat";
 
-    return directory / "seat" / std::filesystem::u8path(fileName);
+    std::string randomName = stem + "_random_" + stamp + ".xlsx";
+    std::string matrixName = stem + "_matrix_" + stamp + ".xlsx";
+
+    return {folder / std::filesystem::u8path(randomName),
+            folder / std::filesystem::u8path(matrixName)};
 }
 
 enum class PauseMode {
@@ -197,24 +206,28 @@ void waitForEnter(PauseMode mode) {
 void printUsage() {
     std::cout
         << "Usage: seatrandom.exe <input.xlsx> [options]\n"
-        << "  --out <path>       output .xlsx path\n"
-        << "  --seed <number>    fixed random seed\n"
-        << "  --no-header        shuffle all rows; default keeps row 1\n"
-        << "  --sheet <name>     process only this sheet; repeatable\n"
-        << "  --force            overwrite an existing output file\n"
-        << "  --pause            keep the console open after exit\n"
-        << "  --no-pause         never wait for Enter\n"
-        << "  --help             show this help\n";
+        << "  --out <path>        normal random output .xlsx path\n"
+        << "  --matrix-out <path> matrix output .xlsx path\n"
+        << "  --name-column <col> name column, e.g. C; default auto-detect\n"
+        << "  --seed <number>     fixed random seed\n"
+        << "  --no-header         shuffle all rows; default keeps row 1\n"
+        << "  --sheet <name>      process only this sheet; repeatable\n"
+        << "  --force             overwrite existing output files\n"
+        << "  --pause             keep the console open after exit\n"
+        << "  --no-pause          never wait for Enter\n"
+        << "  --help              show this help\n";
 }
 
 struct CommandLineOptions {
     std::filesystem::path input;
     std::filesystem::path output;
+    std::filesystem::path matrixOutput;
     std::optional<uint64_t> seed;
     bool hasHeader = true;
     bool force = false;
     bool help = false;
     PauseMode pauseMode = PauseMode::Auto;
+    uint16_t nameColumn = 0;
     std::vector<std::string> sheets;
 };
 
@@ -233,6 +246,21 @@ uint64_t parseSeed(std::string const& text) {
     } catch (std::exception const&) {
         throw std::runtime_error("Invalid seed: " + text);
     }
+}
+
+uint16_t parseColumn(std::string const& text) {
+    if (text.empty()) throw std::runtime_error("Invalid column: " + text);
+
+    uint32_t value = 0;
+    for (unsigned char c : text) {
+        if (!std::isalpha(c)) throw std::runtime_error("Invalid column: " + text);
+        value = value * 26 + static_cast<uint32_t>(std::toupper(c) - 'A' + 1);
+    }
+
+    if (value == 0 || value > 16384) {
+        throw std::runtime_error("Invalid column: " + text);
+    }
+    return static_cast<uint16_t>(value);
 }
 
 CommandLineOptions parseArguments(std::vector<std::string> const& arguments) {
@@ -258,6 +286,16 @@ CommandLineOptions parseArguments(std::vector<std::string> const& arguments) {
                 throw std::runtime_error("Missing value for " + argument);
             }
             options.output = std::filesystem::u8path(arguments[index]);
+        } else if (argument == "--matrix-out") {
+            if (++index >= arguments.size()) {
+                throw std::runtime_error("Missing value for " + argument);
+            }
+            options.matrixOutput = std::filesystem::u8path(arguments[index]);
+        } else if (argument == "--name-column") {
+            if (++index >= arguments.size()) {
+                throw std::runtime_error("Missing value for " + argument);
+            }
+            options.nameColumn = parseColumn(arguments[index]);
         } else if (argument == "--seed" || argument == "-s") {
             if (++index >= arguments.size()) {
                 throw std::runtime_error("Missing value for " + argument);
@@ -292,18 +330,48 @@ CommandLineOptions parseArguments(std::vector<std::string> const& arguments) {
         throw std::runtime_error("Can't read the file: not an .xlsx file");
     }
 
-    if (options.output.empty()) {
-        options.output = defaultOutputPath(options.input);
+    if (options.output.empty() && options.matrixOutput.empty()) {
+        auto paths = defaultOutputPaths(options.input);
+        options.output = paths.random;
+        options.matrixOutput = paths.matrix;
+    } else if (options.output.empty()) {
+        options.output = defaultOutputPaths(options.input).random;
+    } else if (options.matrixOutput.empty()) {
+        auto directory = options.output.parent_path();
+        auto stemValue = options.output.stem().u8string();
+        std::string name(stemValue.begin(), stemValue.end());
+        name += "_matrix";
+        auto extension = options.output.extension();
+        if (extension.empty()) {
+            name += ".xlsx";
+        } else {
+            auto extensionValue = extension.u8string();
+            name.append(extensionValue.begin(), extensionValue.end());
+        }
+        options.matrixOutput = directory / std::filesystem::u8path(name);
     }
 
-    if (std::filesystem::absolute(options.input).lexically_normal() ==
-        std::filesystem::absolute(options.output).lexically_normal()) {
+    auto inputPath = std::filesystem::absolute(options.input).lexically_normal();
+    auto randomPath = std::filesystem::absolute(options.output).lexically_normal();
+    auto matrixPath = std::filesystem::absolute(options.matrixOutput).lexically_normal();
+
+    if (randomPath == inputPath || matrixPath == inputPath) {
         throw std::runtime_error("Output path must differ from input path");
+    }
+
+    if (randomPath == matrixPath) {
+        throw std::runtime_error("Random and matrix output paths must differ");
     }
 
     if (!options.force && std::filesystem::exists(options.output)) {
         throw std::runtime_error("Output file already exists: " +
                                  options.output.u8string() +
+                                 " (use --force to overwrite)");
+    }
+
+    if (!options.force && std::filesystem::exists(options.matrixOutput)) {
+        throw std::runtime_error("Matrix output file already exists: " +
+                                 options.matrixOutput.u8string() +
                                  " (use --force to overwrite)");
     }
 
@@ -333,6 +401,9 @@ int main(int argc, char** argv) {
             if (!options.output.parent_path().empty()) {
                 std::filesystem::create_directories(options.output.parent_path());
             }
+            if (!options.matrixOutput.parent_path().empty()) {
+                std::filesystem::create_directories(options.matrixOutput.parent_path());
+            }
 
             seatrandom::ShuffleOptions shuffleOptions;
             shuffleOptions.hasHeader = options.hasHeader;
@@ -341,6 +412,14 @@ int main(int argc, char** argv) {
             shuffleOptions.selectedSheets = options.sheets;
 
             auto result = seatrandom::shuffleWorkbook(options.input, options.output, shuffleOptions);
+
+            seatrandom::MatrixOptions matrixOptions;
+            matrixOptions.hasHeader = options.hasHeader;
+            matrixOptions.forceOverwrite = options.force;
+            matrixOptions.nameColumn = options.nameColumn;
+
+            auto matrixResult = seatrandom::writeMatrixWorkbook(
+                options.output, options.matrixOutput, result, matrixOptions);
 
             std::cout << "Seed: " << result.seed << "\n";
             for (auto const& sheet : result.sheets) {
@@ -351,7 +430,17 @@ int main(int argc, char** argv) {
                               << " rows, seed " << sheet.seed << "\n";
                 }
             }
-            std::cout << "Output: " << options.output.u8string() << "\n";
+            for (auto const& sheet : matrixResult.sheets) {
+                if (sheet.skipped) {
+                    std::cout << "[matrix-skip] " << sheet.name << ": "
+                              << sheet.reason << "\n";
+                } else {
+                    std::cout << "[matrix] " << sheet.name << ": " << sheet.people
+                              << " people, " << sheet.blocks << " block(s)\n";
+                }
+            }
+            std::cout << "Random output: " << options.output.u8string() << "\n";
+            std::cout << "Matrix output: " << options.matrixOutput.u8string() << "\n";
         }
     } catch (std::exception const& error) {
         std::cerr << "Error: " << error.what() << "\n";
