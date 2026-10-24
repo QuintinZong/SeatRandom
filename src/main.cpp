@@ -147,22 +147,55 @@ std::string timestamp() {
     return buffer;
 }
 
+std::string examtime() {
+    auto now = std::chrono::system_clock::now();
+    std::time_t value = std::chrono::system_clock::to_time_t(now);
+    std::tm* local = std::localtime(&value);
+    if (local == nullptr) throw std::runtime_error("Can't read the current time");
+    std::tm copy = *local;
+    char month[32]{};
+    std::strftime(month, sizeof(month), "%m", &copy);
+    return month;
+}
+
 struct OutputPaths {
     std::filesystem::path random;
     std::filesystem::path matrix;
 };
 
 OutputPaths defaultOutputPaths(std::filesystem::path const& input) {
-    auto directory = input.parent_path();
-    if (directory.empty()) directory = std::filesystem::current_path();
-
     auto stemValue = input.stem().u8string();
     std::string stem(stemValue.begin(), stemValue.end());
     std::string stamp = timestamp();
-    auto folder = directory / "seat";
+    std::string examtime_ = examtime();
+    auto folder = executableDirectory() / "seat";
+    std::string randomName;
+    std::string matrixName;
 
-    std::string randomName = stem + "_random_" + stamp + ".xlsx";
-    std::string matrixName = stem + "_matrix_" + stamp + ".xlsx";
+    if (examtime_ == "02" || examtime_ == "09") {
+        randomName = stem + "_第一次月考座位表" + "_random" + stamp + ".xlsx";
+        matrixName = stem + "_第一次月考座位表" + "_matrix" + stamp + ".xlsx";
+    }
+    
+    else if (examtime_ == "03" || examtime_ == "10") {
+        randomName = stem + "_期中考试座位表" + "_random" + stamp + ".xlsx";
+        matrixName = stem + "_期中考试座位表" + "_matrix" + stamp + ".xlsx";
+    }
+    
+    else if (examtime_ == "04" || examtime_ == "11") {
+        randomName = stem + "_第二次月考座位表" + "_random" + stamp + ".xlsx";
+        matrixName = stem + "_第二次月考座位表" + "_matrix" + stamp + ".xlsx";
+    }
+
+    else if (examtime_ == "05" || examtime_ == "12") {
+        randomName = stem + "_期末考试座位表" + "_random" + stamp + ".xlsx";
+        matrixName = stem + "_期末考试座位表" + "_matrix" + stamp + ".xlsx";
+    }
+
+    else {
+        randomName = stem + "_random_" + stamp + ".xlsx";
+        matrixName = stem + "_matrix_" + stamp + ".xlsx";
+    }
 
     return {folder / std::filesystem::u8path(randomName),
             folder / std::filesystem::u8path(matrixName)};
