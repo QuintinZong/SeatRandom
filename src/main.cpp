@@ -178,28 +178,28 @@ OutputPaths defaultOutputPaths(std::filesystem::path const& input) {
     auto folder = executableDirectory() / "seat";
     std::string randomName;
     std::string matrixName;
-    std::cout << "请输入考试月份（1/2/3/4/5/6/9/10/11/12）" << std::endl;
+    std::cout << "请输入考试月份（1/2/3/4/5/6/9/10/11/12）：" << std::endl;
     std::cin>>examtime_;
     std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
 
     if (examtime_ == "3" || examtime_ == "10") {
-        randomName = stem + "_第一次月考座位表" + "_random" + stamp + ".xlsx";
-        matrixName = stem + "_第一次月考座位表" + "_matrix" + stamp + ".xlsx";
+        randomName = stem + "_第一次月考座位表" + "_random_" + stamp + ".xlsx";
+        matrixName = stem + "_第一次月考座位表" + "_matrix_" + stamp + ".xlsx";
     }
     
     else if (examtime_ == "4" || examtime_ == "11") {
-        randomName = stem + "_期中考试座位表" + "_random" + stamp + ".xlsx";
-        matrixName = stem + "_期中考试座位表" + "_matrix" + stamp + ".xlsx";
+        randomName = stem + "_期中考试座位表" + "_random_" + stamp + ".xlsx";
+        matrixName = stem + "_期中考试座位表" + "_matrix_" + stamp + ".xlsx";
     }
     
     else if (examtime_ == "5" || examtime_ == "12") {
-        randomName = stem + "_第二次月考座位表" + "_random" + stamp + ".xlsx";
-        matrixName = stem + "_第二次月考座位表" + "_matrix" + stamp + ".xlsx";
+        randomName = stem + "_第二次月考座位表" + "_random_" + stamp + ".xlsx";
+        matrixName = stem + "_第二次月考座位表" + "_matrix_" + stamp + ".xlsx";
     }
 
     else if (examtime_ == "6" || examtime_ == "1") {
-        randomName = stem + "_期末考试座位表" + "_random" + stamp + ".xlsx";
-        matrixName = stem + "_期末考试座位表" + "_matrix" + stamp + ".xlsx";
+        randomName = stem + "_期末考试座位表" + "_random_" + stamp + ".xlsx";
+        matrixName = stem + "_期末考试座位表" + "_matrix_" + stamp + ".xlsx";
     }
 
     else {
