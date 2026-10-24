@@ -6,6 +6,7 @@
 #include <cctype>
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -17,12 +18,47 @@ namespace seatrandom {
 
 namespace {
 
-constexpr uint16_t MatrixColumns = 6;
-constexpr uint32_t LargeMatrixRows = 6;
-constexpr uint32_t LargeMatrixCapacity = MatrixColumns * LargeMatrixRows;
-constexpr uint32_t LargeMatrixThreshold = 100;
-constexpr uint32_t MatrixGapRows = 3;
-constexpr uint32_t LargeMatrixStride = LargeMatrixRows + MatrixGapRows;
+struct RoomSpec {
+    const char* templateSheet;
+    const char* sourceSheet;
+    const char* label;
+    uint32_t firstSeatRow;
+    uint32_t lastSeatRow;
+    uint16_t firstSeatColumn;
+    uint16_t lastSeatColumn;
+    uint32_t capacity;
+};
+
+constexpr RoomSpec Rooms[] = {
+    {"全体", "全体", "2号楼101", 6, 11, 2, 7, 36},
+    {"全体", "全体", "2号楼102", 15, 20, 2, 7, 36},
+    {"全体", "全体", "2号楼103", 24, 29, 2, 7, 36},
+    {"全体", "全体", "2号楼104", 34, 39, 2, 7, 36},
+    {"全体", "全体", "2号楼105", 43, 49, 2, 7, 36},
+    {"全体", "全体", "2号楼106", 53, 59, 2, 7, 36},
+    {"全体", "全体", "1号楼101", 63, 70, 2, 7, 48},
+    {"全体", "全体", "1号楼104", 74, 79, 2, 8, 42},
+    {"全体", "全体", "1号楼109", 83, 91, 2, 6, 44},
+    {"全体", "全体", "1号楼110", 95, 102, 2, 7, 42},
+    {"全体", "全体", "新增30人考场", 106, 113, 2, 7, 30},
+    {"全体", "全体", "新增20人考场", 117, 124, 2, 7, 20},
+
+    {"外语", "英语", "2号楼101", 4, 10, 2, 7, 36},
+    {"外语", "英语", "2号楼102", 14, 20, 2, 7, 36},
+    {"外语", "英语", "2号楼103", 24, 30, 2, 7, 36},
+    {"外语", "英语", "1号楼101", 34, 41, 2, 7, 42},
+    {"外语", "英语", "1号楼104", 45, 50, 2, 8, 42},
+    {"外语", "英语", "1号楼109", 54, 62, 2, 6, 44},
+    {"外语", "英语", "1号楼110", 66, 73, 2, 7, 38},
+    {"外语", "德语", "2号楼106", 77, 81, 2, 7, 28},
+    {"外语", "日语", "2号楼104", 85, 90, 2, 7, 33},
+    {"外语", "日语", "2号楼105", 94, 99, 2, 7, 33},
+    {"外语", "零日", "零日", 103, 107, 2, 7, 28},
+    {"外语", "法语", "法语", 111, 115, 2, 7, 15},
+    {"外语", "零法", "零法", 119, 123, 2, 7, 11},
+    {"外语", "西语", "西语", 127, 131, 2, 7, 11},
+    {"外语", "零西", "零西", 135, 139, 2, 7, 9},
+};
 
 std::string pathToUtf8(std::filesystem::path const& path) {
     auto value = path.u8string();
@@ -64,110 +100,31 @@ std::vector<std::string> readNames(XLWorksheet& sheet, uint32_t firstDataRow,
     return names;
 }
 
-XLStyleIndex makeMatrixFormat(XLDocument& document) {
-    auto& styles = document.styles();
-
-    auto borderIndex = styles.borders().create();
-    auto border = styles.borders().borderByIndex(borderIndex);
-    XLColor black(0, 0, 0);
-    border.setLeft(XLLineStyleThin, black);
-    border.setRight(XLLineStyleThin, black);
-    border.setTop(XLLineStyleThin, black);
-    border.setBottom(XLLineStyleThin, black);
-
-    auto formatIndex = styles.cellFormats().create();
-    auto format = styles.cellFormats().cellFormatByIndex(formatIndex);
-    format.setBorderIndex(borderIndex);
-    format.setApplyBorder(true);
-
-    auto alignment = format.alignment(XLCreateIfMissing);
-    alignment.setHorizontal(XLAlignCenter);
-    alignment.setVertical(XLAlignCenter);
-    format.setApplyAlignment(true);
-
-    return formatIndex;
-}
-
-void applyCell(XLWorksheet& sheet, uint32_t row, uint16_t column,
-               std::string const* name, XLStyleIndex formatIndex) {
-    auto cell = sheet.cell(row, column);
-    if (name != nullptr) cell.value() = *name;
-    cell.setCellFormat(formatIndex);
-}
-
-void writeMatrix(XLWorksheet& sheet, std::vector<std::string> const& names,
-                 XLStyleIndex formatIndex) {
-    size_t count = names.size();
-    if (count == 0) return;
-
-    if (count >= LargeMatrixThreshold) {
-        size_t blockCount = (count + LargeMatrixCapacity - 1) / LargeMatrixCapacity;
-        for (size_t block = 0; block < blockCount; ++block) {
-            uint32_t startRow = 1 + static_cast<uint32_t>(block) * LargeMatrixStride;
-            size_t base = block * LargeMatrixCapacity;
-
-            for (uint16_t column = 1; column <= MatrixColumns; ++column) {
-                for (uint32_t row = 0; row < LargeMatrixRows; ++row) {
-                    size_t index = base +
-                                   static_cast<size_t>(column - 1) * LargeMatrixRows +
-                                   row;
-                    std::string const* name = index < count ? &names[index] : nullptr;
-                    applyCell(sheet, startRow + row, column, name, formatIndex);
-                }
-            }
-
-            for (uint32_t row = 0; row < LargeMatrixRows; ++row) {
-                sheet.row(startRow + row).setHeight(22.0f);
-            }
-        }
-    } else {
-        uint32_t rows = static_cast<uint32_t>((count + MatrixColumns - 1) / MatrixColumns);
-
-        for (uint16_t column = 1; column <= MatrixColumns; ++column) {
-            for (uint32_t row = 0; row < rows; ++row) {
-                size_t index = static_cast<size_t>(column - 1) * rows + row;
-                std::string const* name = index < count ? &names[index] : nullptr;
-                applyCell(sheet, row + 1, column, name, formatIndex);
-            }
-        }
-
-        for (uint32_t row = 1; row <= rows; ++row) {
-            sheet.row(row).setHeight(22.0f);
-        }
-    }
-
-    for (uint16_t column = 1; column <= MatrixColumns; ++column) {
-        sheet.column(column).setWidth(16.0f);
-    }
-}
-
 }
 
 MatrixResult writeMatrixWorkbook(std::filesystem::path const& shuffledWorkbook,
                                 std::filesystem::path const& matrixWorkbook,
                                 ShuffleResult const& shuffleResult,
                                 MatrixOptions const& options) {
-    MatrixResult result;
+    if (options.templatePath.empty()) {
+        throw std::runtime_error("No template file specified");
+    }
 
     XLDocument source;
-    source.open(pathToUtf8(shuffledWorkbook));
+    try {
+        source.open(pathToUtf8(shuffledWorkbook));
+    } catch (std::exception const& error) {
+        throw std::runtime_error(std::string("Can't open shuffled workbook: ") + error.what());
+    }
+
     auto sourceWorkbook = source.workbook();
 
-    struct SheetData {
-        std::string name;
-        std::vector<std::string> names;
-    };
-
-    std::vector<SheetData> sheetData;
+    std::map<std::string, std::vector<std::string>> namesBySheet;
+    std::map<std::string, std::string> skippedSheets;
 
     for (auto const& report : shuffleResult.sheets) {
-        MatrixSheetReport matrixReport;
-        matrixReport.name = report.name;
-
         if (report.skipped) {
-            matrixReport.skipped = true;
-            matrixReport.reason = report.reason;
-            result.sheets.push_back(matrixReport);
+            skippedSheets[report.name] = report.reason;
             continue;
         }
 
@@ -180,49 +137,94 @@ MatrixResult writeMatrixWorkbook(std::filesystem::path const& shuffledWorkbook,
         }
 
         uint32_t firstDataRow = options.hasHeader ? 2u : 1u;
-        auto names = readNames(sheet, firstDataRow, report.dataRows, nameColumn);
+        namesBySheet[report.name] =
+            readNames(sheet, firstDataRow, report.dataRows, nameColumn);
+    }
 
-        if (names.empty()) {
-            matrixReport.skipped = true;
-            matrixReport.reason = "no names";
-            result.sheets.push_back(matrixReport);
-            continue;
+    std::map<std::string, uint32_t> required;
+    for (auto const& room : Rooms) {
+        required[room.sourceSheet] += room.capacity;
+    }
+
+    for (auto const& entry : required) {
+        auto const& sourceSheet = entry.first;
+        uint32_t needed = entry.second;
+
+        auto skipped = skippedSheets.find(sourceSheet);
+        if (skipped != skippedSheets.end()) {
+            throw std::runtime_error("Sheet " + sourceSheet + " was skipped: " +
+                                     skipped->second);
         }
 
-        matrixReport.people = static_cast<uint32_t>(names.size());
-        matrixReport.blocks = names.size() >= LargeMatrixThreshold
-                                  ? static_cast<uint32_t>(
-                                        (names.size() + LargeMatrixCapacity - 1) /
-                                        LargeMatrixCapacity)
-                                  : 1;
-        result.sheets.push_back(matrixReport);
+        auto names = namesBySheet.find(sourceSheet);
+        if (names == namesBySheet.end()) {
+            throw std::runtime_error("Missing source sheet in shuffled workbook: " +
+                                     sourceSheet);
+        }
 
-        sheetData.push_back({report.name, std::move(names)});
+        if (names->second.size() != needed) {
+            throw std::runtime_error(
+                "Sheet " + sourceSheet + " has " +
+                std::to_string(names->second.size()) +
+                " names, template requires " + std::to_string(needed));
+        }
     }
 
     XLDocument target;
-    target.create(pathToUtf8(matrixWorkbook),
-                  options.forceOverwrite ? XLForceOverwrite : XLDoNotOverwrite);
+    try {
+        target.open(pathToUtf8(options.templatePath));
+    } catch (std::exception const& error) {
+        throw std::runtime_error(std::string("Can't open template file: ") + error.what());
+    }
+
     auto targetWorkbook = target.workbook();
 
-    if (!sheetData.empty()) {
-        auto firstSheet = targetWorkbook.worksheet(1);
-        if (firstSheet.name() != sheetData.front().name) {
-            firstSheet.setName(sheetData.front().name);
+    std::map<std::string, size_t> cursors;
+    std::map<std::string, MatrixSheetReport> reports;
+
+    for (auto const& room : Rooms) {
+        auto sheet = targetWorkbook.worksheet(room.templateSheet);
+        auto& names = namesBySheet.at(room.sourceSheet);
+        size_t& cursor = cursors[room.sourceSheet];
+
+        uint64_t seatCells =
+            static_cast<uint64_t>(room.lastSeatRow - room.firstSeatRow + 1) *
+            static_cast<uint64_t>(room.lastSeatColumn - room.firstSeatColumn + 1);
+
+        if (room.capacity > seatCells) {
+            throw std::runtime_error(
+                "Room " + std::string(room.label) +
+                " capacity " + std::to_string(room.capacity) +
+                " exceeds seat cells " + std::to_string(seatCells));
         }
-        for (size_t index = 1; index < sheetData.size(); ++index) {
-            targetWorkbook.addWorksheet(sheetData[index].name);
+
+        uint32_t remaining = room.capacity;
+        for (uint32_t row = room.firstSeatRow;
+             row <= room.lastSeatRow && remaining > 0; ++row) {
+            for (uint16_t column = room.firstSeatColumn;
+                 column <= room.lastSeatColumn && remaining > 0; ++column) {
+                sheet.cell(row, column).value() = names[cursor++];
+                --remaining;
+            }
         }
+
+        auto& report = reports[room.templateSheet];
+        report.name = room.templateSheet;
+        report.people += room.capacity;
+        report.blocks += 1;
     }
 
-    auto formatIndex = makeMatrixFormat(target);
-
-    for (auto const& data : sheetData) {
-        auto sheet = targetWorkbook.worksheet(data.name);
-        writeMatrix(sheet, data.names, formatIndex);
+    try {
+        target.saveAs(pathToUtf8(matrixWorkbook),
+                      options.forceOverwrite ? XLForceOverwrite : XLDoNotOverwrite);
+    } catch (std::exception const& error) {
+        throw std::runtime_error(std::string("Can't write matrix file: ") + error.what());
     }
 
-    target.save();
+    MatrixResult result;
+    for (auto const& entry : reports) {
+        result.sheets.push_back(entry.second);
+    }
     return result;
 }
 

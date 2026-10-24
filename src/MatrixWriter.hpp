@@ -13,6 +13,7 @@ struct MatrixOptions {
     bool hasHeader = true;
     bool forceOverwrite = false;
     uint16_t nameColumn = 0;
+    std::filesystem::path templatePath;
 };
 
 struct MatrixSheetReport {

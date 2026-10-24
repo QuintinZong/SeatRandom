@@ -107,6 +107,24 @@ std::string lowercaseExtension(std::filesystem::path const& path) {
     return result;
 }
 
+std::filesystem::path findTemplateInExecutableDirectory() {
+    auto directory = executableDirectory();
+    std::vector<std::filesystem::path> candidates;
+
+    for (auto const& entry : std::filesystem::directory_iterator(directory)) {
+        if (!entry.is_regular_file()) continue;
+        if (lowercaseExtension(entry.path()) != ".xlsx") continue;
+        auto name = entry.path().filename().u8string();
+        if (name.find(u8"模板") != std::string::npos) {
+            candidates.push_back(entry.path());
+        }
+    }
+
+    if (candidates.empty()) throw std::runtime_error("Can't find template xlsx");
+    if (candidates.size() > 1) throw std::runtime_error("Multiple template xlsx files found");
+    return candidates.front();
+}
+
 std::filesystem::path resolveInputFile() {
     auto directory = executableDirectory();
     std::vector<std::filesystem::path> candidates;
@@ -115,6 +133,7 @@ std::filesystem::path resolveInputFile() {
         if (!entry.is_regular_file()) continue;
         auto fileName = entry.path().filename().u8string();
         if (fileName.rfind("~$", 0) == 0) continue;
+        if (fileName.find(u8"模板") != std::string::npos) continue;
         if (lowercaseExtension(entry.path()) == ".xlsx") {
             candidates.push_back(entry.path());
         }
@@ -232,6 +251,7 @@ void printUsage() {
         << "Usage: seatrandom.exe <input.xlsx> [options]\n"
         << "  --out <path>        normal random output .xlsx path\n"
         << "  --matrix-out <path> matrix output .xlsx path\n"
+        << "  --template <path>   template .xlsx path\n"
         << "  --name-column <col> name column, e.g. C; default auto-detect\n"
         << "  --seed <number>     fixed random seed\n"
         << "  --no-header         shuffle all rows; default keeps row 1\n"
@@ -246,6 +266,7 @@ struct CommandLineOptions {
     std::filesystem::path input;
     std::filesystem::path output;
     std::filesystem::path matrixOutput;
+    std::filesystem::path templatePath;
     std::optional<uint64_t> seed;
     bool hasHeader = true;
     bool force = false;
@@ -315,6 +336,11 @@ CommandLineOptions parseArguments(std::vector<std::string> const& arguments) {
                 throw std::runtime_error("Missing value for " + argument);
             }
             options.matrixOutput = std::filesystem::u8path(arguments[index]);
+        } else if (argument == "--template") {
+            if (++index >= arguments.size()) {
+                throw std::runtime_error("Missing value for " + argument);
+            }
+            options.templatePath = std::filesystem::u8path(arguments[index]);
         } else if (argument == "--name-column") {
             if (++index >= arguments.size()) {
                 throw std::runtime_error("Missing value for " + argument);
@@ -354,6 +380,19 @@ CommandLineOptions parseArguments(std::vector<std::string> const& arguments) {
         throw std::runtime_error("Can't read the file: not an .xlsx file");
     }
 
+    if (options.templatePath.empty()) {
+        options.templatePath = findTemplateInExecutableDirectory();
+    }
+
+    if (!std::filesystem::is_regular_file(options.templatePath)) {
+        throw std::runtime_error("Can't find template file: " +
+                                 options.templatePath.u8string());
+    }
+
+    if (lowercaseExtension(options.templatePath) != ".xlsx") {
+        throw std::runtime_error("Can't read the template file: not an .xlsx file");
+    }
+
     if (options.output.empty() && options.matrixOutput.empty()) {
         auto paths = defaultOutputPaths(options.input);
         options.output = paths.random;
@@ -378,6 +417,7 @@ CommandLineOptions parseArguments(std::vector<std::string> const& arguments) {
     auto inputPath = std::filesystem::absolute(options.input).lexically_normal();
     auto randomPath = std::filesystem::absolute(options.output).lexically_normal();
     auto matrixPath = std::filesystem::absolute(options.matrixOutput).lexically_normal();
+    auto templatePath = std::filesystem::absolute(options.templatePath).lexically_normal();
 
     if (randomPath == inputPath || matrixPath == inputPath) {
         throw std::runtime_error("Output path must differ from input path");
@@ -385,6 +425,10 @@ CommandLineOptions parseArguments(std::vector<std::string> const& arguments) {
 
     if (randomPath == matrixPath) {
         throw std::runtime_error("Random and matrix output paths must differ");
+    }
+
+    if (randomPath == templatePath || matrixPath == templatePath) {
+        throw std::runtime_error("Output path must differ from template path");
     }
 
     if (!options.force && std::filesystem::exists(options.output)) {
@@ -441,6 +485,7 @@ int main(int argc, char** argv) {
             matrixOptions.hasHeader = options.hasHeader;
             matrixOptions.forceOverwrite = options.force;
             matrixOptions.nameColumn = options.nameColumn;
+            matrixOptions.templatePath = options.templatePath;
 
             auto matrixResult = seatrandom::writeMatrixWorkbook(
                 options.output, options.matrixOutput, result, matrixOptions);
