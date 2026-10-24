@@ -146,18 +146,6 @@ std::string timestamp() {
     std::strftime(buffer, sizeof(buffer), "%Y%m%d_%H%M%S", &copy);
     return buffer;
 }
-
-std::string examtime() {
-    auto now = std::chrono::system_clock::now();
-    std::time_t value = std::chrono::system_clock::to_time_t(now);
-    std::tm* local = std::localtime(&value);
-    if (local == nullptr) throw std::runtime_error("Can't read the current time");
-    std::tm copy = *local;
-    char month[32]{};
-    std::strftime(month, sizeof(month), "%m", &copy);
-    return month;
-}
-
 struct OutputPaths {
     std::filesystem::path random;
     std::filesystem::path matrix;
@@ -167,27 +155,30 @@ OutputPaths defaultOutputPaths(std::filesystem::path const& input) {
     auto stemValue = input.stem().u8string();
     std::string stem(stemValue.begin(), stemValue.end());
     std::string stamp = timestamp();
-    std::string examtime_ = examtime();
+    std::string examtime_;
     auto folder = executableDirectory() / "seat";
     std::string randomName;
     std::string matrixName;
+    std::cout << "请输入考试月份（1/2/3/4/5/6/9/10/11/12）" << std::endl;
+    std::cin>>examtime_;
+    std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
 
-    if (examtime_ == "02" || examtime_ == "09") {
+    if (examtime_ == "3" || examtime_ == "10") {
         randomName = stem + "_第一次月考座位表" + "_random" + stamp + ".xlsx";
         matrixName = stem + "_第一次月考座位表" + "_matrix" + stamp + ".xlsx";
     }
     
-    else if (examtime_ == "03" || examtime_ == "10") {
+    else if (examtime_ == "4" || examtime_ == "11") {
         randomName = stem + "_期中考试座位表" + "_random" + stamp + ".xlsx";
         matrixName = stem + "_期中考试座位表" + "_matrix" + stamp + ".xlsx";
     }
     
-    else if (examtime_ == "04" || examtime_ == "11") {
+    else if (examtime_ == "5" || examtime_ == "12") {
         randomName = stem + "_第二次月考座位表" + "_random" + stamp + ".xlsx";
         matrixName = stem + "_第二次月考座位表" + "_matrix" + stamp + ".xlsx";
     }
 
-    else if (examtime_ == "05" || examtime_ == "12") {
+    else if (examtime_ == "6" || examtime_ == "1") {
         randomName = stem + "_期末考试座位表" + "_random" + stamp + ".xlsx";
         matrixName = stem + "_期末考试座位表" + "_matrix" + stamp + ".xlsx";
     }
